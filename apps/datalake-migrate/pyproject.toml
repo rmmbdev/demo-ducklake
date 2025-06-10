@@ -1,0 +1,14 @@
+[project]
+name = "datalake-migrate"
+version = "0.1.0"
+description = "This is the migrator of datalake"
+authors = [
+    {name = "rmmbdev",email = "reza.mohammadi.moqaddam@gmail.com"}
+]
+readme = "README.md"
+requires-python = "==3.12.9"
+dependencies = [
+    "duckdb==1.3.0",
+    "environs~=14.1.0",
+    "loguru~=0.7.3"
+]
