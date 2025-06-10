@@ -1,0 +1,118 @@
+services:
+  postgres:
+    image: postgres:17.2-bookworm
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: datalake_catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d datalake_catalog" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ducklakenet
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: minio
+    restart: always
+    ports:
+      - "9000:9000" # MinIO API port
+      - "9001:9001" # MinIO console port
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_SERVER_ACCESS_KEY=access_key
+      - MINIO_SERVER_SECRET_KEY=secret_key
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/ready" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ducklakenet
+
+  minio-migrate:
+    image: minio-migrate:latest
+    container_name: minio-migrate
+    build:
+      context: ./apps/minio-migrate
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb local/users;
+      /usr/bin/mc admin user add local user01 secret_key;
+      /usr/bin/mc admin policy create local users-policy /configs/users-policy.json;
+      /usr/bin/mc admin policy attach local users-policy --user user01;
+      exit 0;
+      "
+    networks:
+      - ducklakenet
+
+  datalake-migrate:
+    image: datalake-migrate:latest
+    container_name: datalake-migrate
+    build:
+      context: ./apps/datalake-migrate
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=datalake_catalog
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=user01
+      - MINIO_SECRET_KEY=secret_key
+      - MINIO_BUCKET=users
+    depends_on:
+      minio-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - ducklakenet
+
+  generator:
+    image: generator:latest
+    container_name: generator
+    build:
+      context: ./apps/generator
+    restart: on-failure
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=datalake_catalog
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=user01
+      - MINIO_SECRET_KEY=secret_key
+      - MINIO_BUCKET=users
+    depends_on:
+      datalake-migrate:
+        condition: service_completed_successfully
+
+    networks:
+      - ducklakenet
+
+volumes:
+  minio_data:
+  postgres_data:
+
+networks:
+  ducklakenet:
+    external: true
