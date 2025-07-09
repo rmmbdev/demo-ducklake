@@ -30,7 +30,7 @@ def main():
 
     # install extensions
     con.execute(f"""
-       
+        INSTALL ducklake;
         LOAD postgres;
         LOAD ducklake;
         LOAD httpfs;
